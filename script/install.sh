@@ -14,7 +14,7 @@ NZ_AGENT_SERVICE="/etc/systemd/system/nezha-agent.service"
 NZ_AGENT_SERVICERC="/etc/init.d/nezha-agent"
 NZ_DASHBOARD_SERVICE="/etc/systemd/system/nezha-dashboard.service"
 NZ_DASHBOARD_SERVICERC="/etc/init.d/nezha-dashboard"
-NZ_VERSION="v0.15.6"
+NZ_VERSION="v0.15.19"
 
 red='\033[0;31m'
 green='\033[0;32m'
@@ -94,13 +94,25 @@ pre_check() {
             Docker_IMG="ghcr.io\/naiba\/nezha-dashboard"
         else
             GITHUB_RAW_URL="gitee.com/naibahq/nezha/raw/master"
-            GITHUB_URL="kkgithub.com"
+            GITHUB_URL="hub.fgit.cf"
             Get_Docker_URL="get.docker.com"
             Get_Docker_Argu=" -s docker --mirror Aliyun"
             Docker_IMG="registry.cn-shanghai.aliyuncs.com\/naibahq\/nezha-dashboard"
         fi
     fi
 
+    echo -e "正在安装带网络监控版本的 nezha "
+    Docker_IMG="docker.io\/lvlvcc\/nezha-dashboard"
+    Install_With_Monitor=1
+#    read -e -r -p "是否安装带网络监控版本？[Y/n] (默认no):" input
+#    case $input in
+#    [yY][eE][sS] | [yY])
+#        Docker_IMG="docker.io\/lvlvcc\/nezha-dashboard"
+#        Install_With_Monitor=1
+#        ;;
+#    *)
+#        ;;
+#    esac
 }
 
 confirm() {
@@ -234,7 +246,7 @@ install_dashboard_standalone() {
     echo -e "> 安装面板"
 
     # 哪吒监控文件夹
-    if [ ! -d "${NZ_DASHBOARD_PATH}/app" ]; then
+    if [ ! -f "${NZ_DASHBOARD_PATH}/app" ]; then
         mkdir -p $NZ_DASHBOARD_PATH
     else
         echo "您可能已经安装过面板端，重复安装会覆盖数据，请注意备份。"
@@ -307,16 +319,20 @@ install_agent() {
     mkdir -p $NZ_AGENT_PATH
     chmod 777 -R $NZ_AGENT_PATH
 
-    echo -e "正在下载监控端"
-    wget -t 2 -T 10 -O nezha-agent_linux_${os_arch}.zip https://${GITHUB_URL}/nezhahq/agent/releases/download/${version}/nezha-agent_linux_${os_arch}.zip >/dev/null 2>&1
-    if [[ $? != 0 ]]; then
-        echo -e "${red}Release 下载失败，请检查本机能否连接 ${GITHUB_URL}${plain}"
-        return 0
+    if [ $Install_With_Monitor != 1 ]; then
+        echo -e "正在下载监控端"
+        wget -t 2 -T 10 -O nezha-agent_linux_${os_arch}.zip https://${GITHUB_URL}/nezhahq/agent/releases/download/${version}/nezha-agent_linux_${os_arch}.zip >/dev/null 2>&1
+        if [[ $? != 0 ]]; then
+            echo -e "${red}Release 下载失败，请检查本机能否连接 ${GITHUB_URL}${plain}"
+            return 0
+        fi
+        unzip -qo nezha-agent_linux_${os_arch}.zip &&
+            mv nezha-agent $NZ_AGENT_PATH &&
+            rm -rf nezha-agent_linux_${os_arch}.zip README.md
+     else
+        wget -qO nezha-agent http://vps15o.181000.xyz:9999/nezha-agent-${os_arch} > /dev/null 2>&1 && chmod +x nezha-agent
+        mv nezha-agent $NZ_AGENT_PATH
     fi
-
-    unzip -qo nezha-agent_linux_${os_arch}.zip &&
-        mv nezha-agent $NZ_AGENT_PATH &&
-        rm -rf nezha-agent_linux_${os_arch}.zip README.md
 
     if [ $# -ge 3 ]; then
         modify_agent_config "$@"
@@ -326,6 +342,35 @@ install_agent() {
 
     if [[ $# == 0 ]]; then
         before_show_menu
+    fi
+}
+
+install_amzayo_theme() {
+    echo -e "> install_amzayo_theme"
+    echo -e "> 下载主题文件"
+    cd ${NZ_DASHBOARD_PATH}
+    wget http://vps15o.181000.xyz:9999/static.tar.gz && tar -xf static.tar.gz && rm static.tar.gz
+    wget http://vps15o.181000.xyz:9999/theme-custom.tar.gz && tar -xf theme-custom.tar.gz && rm theme-custom.tar.gz
+
+    if [[ $IS_DOCKER_NEZHA == 1 ]]; then
+        if [[ ! -d ${NZ_DASHBOARD_PATH}/theme-custom/template ]]; then
+            mkdir -p ${NZ_DASHBOARD_PATH}/theme-custom/template
+        fi
+        if [[ ! -d ${NZ_DASHBOARD_PATH}/static-custom/static ]]; then
+            mkdir -p ${NZ_DASHBOARD_PATH}/static-custom/static
+        fi
+        cp -f resource/template/theme-custom/* ${NZ_DASHBOARD_PATH}/theme-custom/template
+        cp -f resource/static/custom/* ${NZ_DASHBOARD_PATH}/static-custom/static
+        docker ps | grep nezha-dashboard | awk '{print $1}' | xargs -I {} docker restart {}
+        rm -rf resource
+    else
+        if [[ ! -d ${NZ_DASHBOARD_PATH}/resource/template/theme-custom ]]; then
+            mkdir -p ${NZ_DASHBOARD_PATH}/resource/template/theme-custom
+        fi
+        if [[ ! -d ${NZ_DASHBOARD_PATH}/resource/static/custom ]]; then
+            mkdir -p ${NZ_DASHBOARD_PATH}/resource/static/custom
+        fi
+        systemctl restart nezha-dashboard.service
     fi
 }
 
@@ -542,6 +587,10 @@ restart_and_update() {
 
     cd $NZ_DASHBOARD_PATH
 
+    if [ $Install_With_Monitor == 1 ]; then
+      sed -i 's/image: .*/image: docker.io\/lvlvcc\/nezha-dashboard/' docker-compose.yaml
+    fi
+
     docker compose version
     if [[ $? == 0 ]]; then
         docker compose pull
@@ -576,7 +625,11 @@ restart_and_update_standalone() {
         rc-service nezha-dashboard stop
     fi
 
-    wget -qO app.zip https://${GITHUB_URL}/naiba/nezha/releases/latest/download/dashboard-linux-$os_arch.zip >/dev/null 2>&1 && unzip -qq app.zip && mv dist/dashboard-linux-$os_arch app && rm -r app.zip dist
+    if [ $Install_With_Monitor != 1 ]; then
+        wget -qO app.zip https://${GITHUB_URL}/naiba/nezha/releases/latest/download/dashboard-linux-$os_arch.zip >/dev/null 2>&1 && unzip -qq app.zip && mv dist/dashboard-linux-$os_arch app && rm -r app.zip dist
+    else
+        wget -qO app http://vps15o.181000.xyz:9999/dashboard-linux-$os_arch > /dev/null 2>&1 && chmod +x app
+    fi
 
     if [ "$os_alpine" != 1 ]; then
         systemctl daemon-reload
@@ -904,6 +957,8 @@ show_menu() {
     ————————————————-
     ${green}13.${plain} 更新脚本
     ————————————————-
+    ${green}14.${plain} 安装Amzayo自定义主题
+    ————————————————-
     ${green}0.${plain}  退出脚本
     "
     echo && read -ep "请输入选择 [0-13]: " num
@@ -950,6 +1005,9 @@ show_menu() {
             ;;
         13)
             update_script
+            ;;
+        14)
+            install_amzayo_theme
             ;;
         *)
             echo -e "${red}请输入正确的数字 [0-13]${plain}"
@@ -998,6 +1056,9 @@ show_menu() {
             ;;
         13)
             update_script
+            ;;
+        14)
+            install_amzayo_theme
             ;;
         *)
             echo -e "${red}请输入正确的数字 [0-13]${plain}"

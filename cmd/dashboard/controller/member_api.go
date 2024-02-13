@@ -394,6 +394,7 @@ type monitorForm struct {
 	MaxLatency             float32
 	LatencyNotify          string
 	EnableTriggerTask      string
+	EnableShowInService    string
 	FailTriggerTasksRaw    string
 	RecoverTriggerTasksRaw string
 }
@@ -415,6 +416,7 @@ func (ma *memberAPI) addOrEditMonitor(c *gin.Context) {
 		m.LatencyNotify = mf.LatencyNotify == "on"
 		m.MinLatency = mf.MinLatency
 		m.MaxLatency = mf.MaxLatency
+		m.EnableShowInService = mf.EnableShowInService == "on"
 		m.EnableTriggerTask = mf.EnableTriggerTask == "on"
 		m.RecoverTriggerTasksRaw = mf.RecoverTriggerTasksRaw
 		m.FailTriggerTasksRaw = mf.FailTriggerTasksRaw
@@ -431,6 +433,7 @@ func (ma *memberAPI) addOrEditMonitor(c *gin.Context) {
 		if err == nil {
 			err = utils.Json.Unmarshal([]byte(mf.RecoverTriggerTasksRaw), &m.RecoverTriggerTasks)
 		}
+    fmt.Println(mf, m.EnableShowInService)
 		if err == nil {
 			if m.ID == 0 {
 				err = singleton.DB.Create(&m).Error

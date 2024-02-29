@@ -351,7 +351,7 @@ func (ss *ServiceSentinel) worker() {
 			}
 			ts.count++
 			ts.ping = (ts.ping*float32(ts.count-1) + mh.Delay) / float32(ts.count)
-			if ts.count == Conf.AvgPingCount {
+			if ts.count >= int(60/ss.monitors[r.Data.GetId()].Duration) {
 				if ts.ping > float32(Conf.MaxTCPPingValue) {
 					ts.ping = float32(Conf.MaxTCPPingValue)
 				}
